@@ -1,0 +1,7 @@
+# Fichiers générés par Godot
+.godot/
+*.import
+# Exports
+build/
+*.exe
+*.pck
