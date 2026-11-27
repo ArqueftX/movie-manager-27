@@ -396,80 +396,94 @@ func _build_dashboard(page: VBoxContainer) -> void:
 	_h(page, "Studio « %s »" % Game.studio_name, 26)
 	_l(page, Game.date_text() + "   ·   " + Game.season_name(), MUTED)
 
-	var next := _panel(page)
-	_h(next, "Que faire maintenant ?", 17)
-	for tip in _tips():
-		_wrap(next, "• " + tip)
-
 	if Game.negative_weeks > 0:
-		_wrap(page, "Attention : trésorerie négative depuis %d semaine(s). Faillite au bout de %d semaines ! Sortez un film, empruntez ou remboursez vos dettes." % [Game.negative_weeks, Game.BANKRUPTCY_WEEKS], BAD)
+		_wrap(page, "Attention : trésorerie dans le rouge depuis %d semaine(s). Faillite au bout de %d ! Sortez un film ou empruntez (onglet Studio)." % [Game.negative_weeks, Game.BANKRUPTCY_WEEKS], BAD)
 
-	_h(page, "Finances", 18)
-	var g := _grid(page, ["", ""])
-	_l(g, "Trésorerie")
-	_money_label(g, Game.money)
-	_l(g, "Prêt bancaire")
-	_l(g, Game.fmt_money(Game.loan))
-	_l(g, "Frais fixes du studio")
-	_l(g, Game.fmt_money(Game.weekly_overhead()) + " / semaine")
-	_l(g, "Réputation")
-	_value_bar(g, int(Game.reputation))
-	_l(g, "Classement (recettes)")
-	_l(g, "%d / %d" % [Game.player_rank(), Game.rivals.size() + 1])
-	_l(g, "Films sortis")
-	_l(g, str(Game.released_films().size()))
-	_l(g, "Recettes totales au box-office")
-	_l(g, Game.fmt_money(Game.total_gross))
+	# 1. Une seule chose à faire, bien visible, avec un bouton qui y mène.
+	var step := _next_step()
+	var card := _panel(page)
+	_l(card, "PROCHAINE ÉTAPE", MUTED)
+	var t := _wrap(card, step["text"])
+	t.add_theme_font_size_override("font_size", 19)
+	var action: Button = null
+	if step.has("tab"):
+		var target: int = step["tab"]
+		action = _b(card, step["button"], func(): _go_to(target))
+	elif step.has("next"):
+		action = _b(card, step["button"], _on_next_week, Game.is_over)
+	if action != null:
+		action.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		action.custom_minimum_size.x = 220
 
-	_h(page, "Ce que le public veut voir", 18)
-	_wrap(page, "Les goûts changent toutes les 4 semaines. Un genre à la mode remplit plus les salles.", MUTED)
-	var tg := _grid(page, ["Genre", "Envie du public", ""])
-	for genre in D.GENRES:
-		_l(tg, genre)
-		_bar(tg, float(Game.trends[genre]) - 0.5, 1.0, 160)
-		var label := Game.trend_label(genre)
-		_l(tg, label, GOOD if Game.trends[genre] >= 1.1 else (BAD if Game.trends[genre] < 0.9 else MUTED))
+	# 2. Les trois chiffres importants.
+	_space(page, 4)
+	var tiles := HBoxContainer.new()
+	tiles.add_theme_constant_override("separation", 12)
+	page.add_child(tiles)
+	_tile(tiles, "Trésorerie", Game.fmt_money(Game.money), GOOD if Game.money >= 0 else BAD)
+	_tile(tiles, "Réputation", "%d / 100" % int(Game.reputation), GOLD)
+	_tile(tiles, "Classement", "%de sur %d" % [Game.player_rank(), Game.rivals.size() + 1], GOLD)
 
+	# 3. Vos films, une ligne chacun.
+	_space(page, 4)
+	_h(page, "Vos films", 18)
 	var current := Game.projects.filter(func(p): return p["phase"] != "finished")
-	if current.size() > 0:
-		_h(page, "Vos films en cours", 18)
-		var pg := _grid(page, ["Titre", "Genre", "Étape", ""])
-		for p in current:
-			_l(pg, p["title"])
-			_l(pg, p["genre"])
-			_l(pg, Game.phase_name(p))
-			if p["phase"] in ["preprod", "shooting", "postprod"]:
-				_l(pg, "encore %d sem." % p["weeks_left"], MUTED)
-			elif p["phase"] == "in_theaters":
-				_l(pg, "semaine %d : %s" % [p["weeks_in"], Game.fmt_money(p["last_gross"])], MUTED)
-			else:
-				_l(pg, "à sortir !", GOLD)
+	if current.is_empty():
+		_l(page, "Aucun film pour l'instant.", MUTED)
+	for p in current:
+		var r := _row(page)
+		_l(r, p["title"])
+		var status := Game.phase_name(p)
+		var color := MUTED
+		if p["phase"] in ["preprod", "shooting", "postprod"]:
+			status += ", encore %d sem." % p["weeks_left"]
+		elif p["phase"] == "in_theaters":
+			status += ", %s cette semaine" % Game.fmt_money(p["last_gross"])
+		else:
+			color = GOLD
+		_l(r, "·  " + status, color)
 
 
-func _tips() -> Array:
-	var tips := []
+func _tile(parent: Node, title: String, value: String, color: Color) -> void:
+	var p := PanelContainer.new()
+	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(p)
+	var v := VBoxContainer.new()
+	p.add_child(v)
+	_l(v, title, MUTED)
+	var l := _l(v, value, color)
+	l.add_theme_font_size_override("font_size", 26)
+
+
+# Choisit la chose la plus utile à faire maintenant.
+func _next_step() -> Dictionary:
 	if Game.pending_event != null:
-		tips.append("Une décision vous attend (fenêtre ouverte).")
+		return {"text": "Une décision vous attend sur un tournage.", "button": "Voir la décision", "next": true}
 	var ready_films := Game.projects.filter(func(p): return p["phase"] == "ready")
 	if ready_films.size() > 0:
-		tips.append("« %s » est terminé : allez dans Productions pour choisir sa sortie au cinéma." % ready_films[0]["title"])
-	if Game.owned_scripts.size() > 0 and Game.free_stages() > 0:
-		tips.append("Vous avez un scénario et un plateau libre : allez dans Productions pour lancer un film.")
-	if Game.owned_scripts.size() == 0 and Game.free_stages() > 0:
-		tips.append("Achetez un scénario dans l'onglet Scénarios (regardez la qualité et le genre à la mode).")
-	if Game.free_stages() <= 0:
-		tips.append("Tous vos plateaux tournent. Cliquez sur « Semaine suivante » pour avancer.")
+		return {"text": "« %s » est terminé ! Choisissez sa sortie au cinéma." % ready_films[0]["title"],
+			"button": "Sortir le film  →", "tab": Tab.PRODUCTIONS}
+	if Game.free_stages() > 0:
+		if Game.owned_scripts.size() > 0:
+			return {"text": "Vous avez un scénario et un plateau libre : lancez un film !",
+				"button": "Créer un film  →", "tab": Tab.PRODUCTIONS}
+		return {"text": "Achetez un scénario pour préparer votre prochain film.",
+			"button": "Voir les scénarios  →", "tab": Tab.SCRIPTS}
 	if Game.money > 15000000.0 and Game.upgrades["plateaux"] < 2:
-		tips.append("Vous avez de l'argent : un 2e plateau (onglet Studio) permet de tourner deux films à la fois.")
-	if tips.is_empty():
-		tips.append("Cliquez sur « Semaine suivante » (ou la touche Espace) pour faire avancer le temps.")
-	return tips
+		return {"text": "Vous avez de l'argent : un 2e plateau permet de tourner deux films en même temps.",
+			"button": "Améliorer le studio  →", "tab": Tab.STUDIO}
+	return {"text": "Vos films avancent. Faites passer le temps.", "button": "Semaine suivante ▶", "next": true}
 
 
 # --- Scénarios --------------------------------------------------------------
 
 func _build_scripts(page: VBoxContainer) -> void:
 	_h(page, "Scénarios à vendre", 22)
+	var hot := D.GENRES.filter(func(g): return Game.trends[g] >= 1.1)
+	var cold := D.GENRES.filter(func(g): return Game.trends[g] < 0.9)
+	_wrap(page, "À la mode en ce moment : %s" % (", ".join(hot) if hot.size() > 0 else "rien de spécial"), GOOD)
+	if cold.size() > 0:
+		_wrap(page, "Le public s'en lasse : %s" % ", ".join(cold), BAD)
 	_wrap(page, "Nouveaux scénarios dans %d semaine(s). La qualité du scénario compte beaucoup dans la qualité du film. Le nombre de rôles = le nombre d'acteurs à engager." % Game.weeks_until_new_scripts(), MUTED)
 	if Game.scripts_market.is_empty():
 		_l(page, "Plus aucun scénario à vendre pour l'instant.")
